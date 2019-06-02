@@ -1,5 +1,6 @@
 #include <condition_variable>
 #include <functional>
+#include <future>
 #include <vector>
 #include <thread>
 #include <queue>
@@ -20,15 +21,20 @@ public:
         stop();
     }
 
-    void enqueue(Task task)
+    template<class T>
+    auto enqueue(T task)->std::future<decltype(task())>
     {
+        auto wrapper = std::make_shared<std::packaged_task<decltype(task()) ()>>(std::move(task));
+
         {
             std::unique_lock<std::mutex> lock{mEventMutex};
-            mTasks.emplace(std::move(task));
+            mTasks.emplace([=]{
+                (*wrapper)();
+            });
         }
 
         mEventVar.notify_one();
-
+        return wrapper->get_future();
     }
 private:
     std::vector<std::thread> mThreads;
@@ -89,12 +95,23 @@ int main()
         ThreadPool pool(36);
         printf("Threadpool initialized\n");
 
+        /*
         pool.enqueue([]{
             std::cout << "1" << std::endl;
         });
         pool.enqueue([]{
             std::cout << "2" << std::endl;
         });
+        */
+
+        auto f1 = pool.enqueue([]{
+            return 1;
+        });
+        auto f2 = pool.enqueue([]{
+            return 2;
+        });
+
+        std::cout << (f1.get() + f2.get()) << std::endl;
     }
     return 0;
 }
