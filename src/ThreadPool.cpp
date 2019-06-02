@@ -3,6 +3,7 @@
 #include <vector>
 #include <thread>
 #include <queue>
+#include <iostream>
 
 class ThreadPool
 {
@@ -44,13 +45,26 @@ private:
         for(auto i = 0u; i< numThreads; ++i)
         {
             mThreads.emplace_back([=] {
-                while(true){
-                    std::unique_lock<std::mutex> lock{mEventMutex};
+                while(true)
+                {
+                    Task task;
 
-                    mEventVar.wait(lock, [=] {return mStopping; });
+                    {
+                    //separate scope, small critical section
+                    //mutex shouldn't be locked when the task is executing.
+                        std::unique_lock<std::mutex> lock{mEventMutex};
 
-                    if(mStopping)
-                        break;
+                        mEventVar.wait(lock, [=] {return mStopping || !mTasks.empty(); });
+
+                        if(mStopping && mTasks.empty())
+                            break;
+                        
+                        task = std::move(mTasks.front());
+                        mTasks.pop();
+                    }//lock released when scope is exited(but the lock will be released when the condition variable waiting is done??)
+
+        
+                    task();
                 }
             });
         }
@@ -71,7 +85,16 @@ private:
 
 int main()
 {
-    ThreadPool pool(36);
-    printf("Threadpool initialized\n");
+    {
+        ThreadPool pool(36);
+        printf("Threadpool initialized\n");
+
+        pool.enqueue([]{
+            std::cout << "1" << std::endl;
+        });
+        pool.enqueue([]{
+            std::cout << "2" << std::endl;
+        });
+    }
     return 0;
 }
